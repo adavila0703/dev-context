@@ -106,10 +106,9 @@ async function fetchJiraTicket(ticketNumber: string): Promise<JiraIssue | undefi
   }
 }
 
-async function fetchGitHubPR(prNumber: string): Promise<{ pr: GitHubPR; files: GitHubPRFile[] } | undefined> {
+async function fetchGitHubPR(prNumber: string, repo: string): Promise<{ pr: GitHubPR; files: GitHubPRFile[] } | undefined> {
   const token = process.env.GITHUB_TOKEN;
   const owner = process.env.GITHUB_OWNER;
-  const repo = process.env.GITHUB_REPO;
 
   if (!token || !owner || !repo) {
     console.log("Please set GITHUB_TOKEN, GITHUB_OWNER, and GITHUB_REPO environment variables");
@@ -174,9 +173,9 @@ async function fetchGitHubPR(prNumber: string): Promise<{ pr: GitHubPR; files: G
 async function analyzeWithOllama(context: DevelopmentContext): Promise<void> {
   try {
     const model = new Ollama({
-      model: "deepseek-r1:14b",
-      temperature: 0,
-      maxRetries: 2,
+      model: process.env.OLLAMA_MODEL,
+      temperature: Number.parseFloat(process.env.OLLAMA_TEMPERATURE || "0.5"),
+      maxRetries: Number.parseInt(process.env.OLLAMA_MAX_RETRIES || '3'),
     });
 
     console.log('Connecting with model:', model.model);
@@ -184,11 +183,6 @@ async function analyzeWithOllama(context: DevelopmentContext): Promise<void> {
     const prompt = PromptTemplate.fromTemplate(`
   You are a senior software engineer preparing to review a pull request. Before diving into the code, you want a clear and concise summary of the Jira ticket and how the PR addresses it.
 
-  **Context (One Paragraph):**  
-  Summarize the Jira ticket in a way that highlights the core problem and any relevant technical details. Then, briefly explain how the PR attempts to resolve it, focusing only on the most critical aspects of the changes. Be clear and concise.
-
-  **Opinion:**  
-  Analyze whether the PR effectively solves the problem. If it does, explain why the approach is appropriate. If not, highlight gaps, risks, or alternative approaches that might be better. Keep it direct and actionable.
 
   ${context.jiraIssue ? `
   **Jira Data:**  
@@ -210,6 +204,14 @@ async function analyzeWithOllama(context: DevelopmentContext): Promise<void> {
 
   **Code Changes:**  
   {pr_patches}  
+
+  Responde in this format:
+
+  **Context (One Paragraph):**  
+  Summarize the Jira ticket in a way that highlights the core problem and any relevant technical details. Then, briefly explain how the PR attempts to resolve it, focusing only on the most critical aspects of the changes. Be clear and concise.
+
+  **Opinion:**  
+  Analyze whether the PR effectively solves the problem. If it does, explain why the approach is appropriate. If not, highlight gaps, risks, or alternative approaches that might be better. Keep it direct and actionable.
   ` : ''}
 `);
 
@@ -249,6 +251,7 @@ async function main() {
     const context: DevelopmentContext = {};
 
     console.log("\nEnter information (press Enter to skip):");
+    const repo = readlineSync.question('Repo name: ');
     const ticketNumber = readlineSync.question('Jira ticket number (e.g., PROJ-123): ');
     const prNumber = readlineSync.question('GitHub PR number: ');
 
@@ -257,7 +260,7 @@ async function main() {
     }
 
     if (prNumber.trim()) {
-      context.pullRequest = await fetchGitHubPR(prNumber.trim());
+      context.pullRequest = await fetchGitHubPR(prNumber.trim(), repo.trim());
     }
 
     if (context.jiraIssue || context.pullRequest) {
