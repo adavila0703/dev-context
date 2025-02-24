@@ -24,7 +24,36 @@ interface JiraResponse {
   issues: JiraIssue[];
 }
 
-async function fetchJiraTicket(ticketNumber: string): Promise<void> {
+interface GitHubPRFile {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string;
+}
+
+interface GitHubPR {
+  number: number;
+  title: string;
+  state: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  user: {
+    login: string;
+  };
+}
+
+interface DevelopmentContext {
+  jiraIssue?: JiraIssue;
+  pullRequest?: {
+    pr: GitHubPR;
+    files: GitHubPRFile[];
+  };
+}
+
+async function fetchJiraTicket(ticketNumber: string): Promise<JiraIssue | undefined> {
   const email = process.env.JIRA_EMAIL;
   const apiToken = process.env.JIRA_API_TOKEN;
   const jiraDomain = process.env.JIRA_DOMAIN;
@@ -69,14 +98,76 @@ async function fetchJiraTicket(ticketNumber: string): Promise<void> {
     console.log(`Description: ${issue.fields.description || 'No description provided'}`);
     console.log("-------------------");
 
-    await analyzeWithOllama(issue);
+    return issue;
 
   } catch (error) {
     console.error('Error fetching Jira data:', error);
+    return;
   }
 }
 
-async function analyzeWithOllama(issue: JiraIssue): Promise<void> {
+async function fetchGitHubPR(prNumber: string): Promise<{ pr: GitHubPR; files: GitHubPRFile[] } | undefined> {
+  const token = process.env.GITHUB_TOKEN;
+  const owner = process.env.GITHUB_OWNER;
+  const repo = process.env.GITHUB_REPO;
+
+  if (!token || !owner || !repo) {
+    console.log("Please set GITHUB_TOKEN, GITHUB_OWNER, and GITHUB_REPO environment variables");
+    return;
+  }
+
+  try {
+    const prUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`;
+    const filesUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files`;
+
+    const [prResponse, filesResponse] = await Promise.all([
+      fetch(prUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }),
+      fetch(filesUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      })
+    ]);
+
+    if (!prResponse.ok || !filesResponse.ok) {
+      console.log(`Error: API returned status code ${prResponse.status} or ${filesResponse.status}`);
+      return;
+    }
+
+    const pr: GitHubPR = await prResponse.json();
+    const files: GitHubPRFile[] = await filesResponse.json();
+
+    console.log('\nPull Request Details:');
+    console.log(`PR #${pr.number}: ${pr.title}`);
+    console.log(`State: ${pr.state}`);
+    console.log(`Created by: ${pr.user.login}`);
+    console.log(`Created at: ${new Date(pr.created_at).toLocaleString()}`);
+    console.log(`Last updated: ${new Date(pr.updated_at).toLocaleString()}`);
+    console.log('\nModified Files:');
+    
+    files.forEach(file => {
+      console.log(`\nFile: ${file.filename}`);
+      console.log(`Status: ${file.status}`);
+      console.log(`Changes: +${file.additions} -${file.deletions}`);
+    });
+    
+    console.log("-------------------");
+
+    return { pr, files };
+
+  } catch (error) {
+    console.error('Error fetching GitHub PR data:', error);
+    return;
+  }
+}
+
+async function analyzeWithOllama(context: DevelopmentContext): Promise<void> {
   try {
     const model = new Ollama({
       model: "deepseek-r1:14b",
@@ -84,26 +175,52 @@ async function analyzeWithOllama(issue: JiraIssue): Promise<void> {
       maxRetries: 2,
     });
 
-    console.log('Connecing with model:', model.model);
+    console.log('Connecting with model:', model.model);
 
     const prompt = PromptTemplate.fromTemplate(`
-            In a one paragraph response with no titles, summarize the following Jira ticket for a software engineer preparing to review a pull request. 
-            Be concise and focus on the problem and any key technical details relevant to the code changes.
+      Analyze the following development context and provide a comprehensive summary for a software engineer.
+      Focus on the technical details and relationships between the Jira ticket and PR changes.
 
-            Jira Data:
-            Ticket: {key}
-            Summary: {summary}
-            Description: {description}
-            Status: {status}
-        `);
+      ${context.jiraIssue ? `
+      Jira Data:
+      Ticket: {jira_key}
+      Summary: {jira_summary}
+      Description: {jira_description}
+      Status: {jira_status}
+      ` : ''}
 
-    const chain = prompt.pipe(model)
+      ${context.pullRequest ? `
+      Pull Request Data:
+      PR #{pr_number}: {pr_title}
+      State: {pr_state}
+      Created by: {pr_author}
+      Description: {pr_body}
+
+      Modified Files:
+      {pr_files}
+      ` : ''}
+
+      Please provide:
+      1. A technical summary of the changes
+      2. Any potential areas that need special attention during review
+      3. Suggestions for testing these changes
+    `);
+
+    const chain = prompt.pipe(model);
 
     const response = await chain.invoke({
-      key: issue.key,
-      summary: issue.fields.summary,
-      description: issue.fields.description || 'No description provided',
-      status: issue.fields.status.name
+      jira_key: context.jiraIssue?.key || '',
+      jira_summary: context.jiraIssue?.fields.summary || '',
+      jira_description: context.jiraIssue?.fields.description || '',
+      jira_status: context.jiraIssue?.fields.status.name || '',
+      pr_number: context.pullRequest?.pr.number || '',
+      pr_title: context.pullRequest?.pr.title || '',
+      pr_state: context.pullRequest?.pr.state || '',
+      pr_author: context.pullRequest?.pr.user.login || '',
+      pr_body: context.pullRequest?.pr.body || '',
+      pr_files: context.pullRequest?.files.map(f => 
+        `${f.filename} (${f.status}): +${f.additions} -${f.deletions}`
+      ).join('\n') || ''
     });
 
     console.log('\nAI Analysis:');
@@ -116,12 +233,27 @@ async function analyzeWithOllama(issue: JiraIssue): Promise<void> {
 }
 
 async function main() {
-  console.log("Jira Ticket Analyzer (Press Ctrl+C to exit)");
+  console.log("Development Context Tool (Press Ctrl+C to exit)");
 
   while (true) {
-    const ticketNumber = readlineSync.question('\nEnter Jira ticket number (e.g., PROJ-123): ');
+    const context: DevelopmentContext = {};
+    
+    console.log("\nEnter information (press Enter to skip):");
+    const ticketNumber = readlineSync.question('Jira ticket number (e.g., PROJ-123): ');
+    const prNumber = readlineSync.question('GitHub PR number: ');
+    
     if (ticketNumber.trim()) {
-      await fetchJiraTicket(ticketNumber.trim());
+      context.jiraIssue = await fetchJiraTicket(ticketNumber.trim());
+    }
+    
+    if (prNumber.trim()) {
+      context.pullRequest = await fetchGitHubPR(prNumber.trim());
+    }
+
+    if (context.jiraIssue || context.pullRequest) {
+      await analyzeWithOllama(context);
+    } else {
+      console.log('No data provided. Please enter at least one identifier.');
     }
   }
 }
