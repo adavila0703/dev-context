@@ -182,31 +182,36 @@ async function analyzeWithOllama(context: DevelopmentContext): Promise<void> {
     console.log('Connecting with model:', model.model);
 
     const prompt = PromptTemplate.fromTemplate(`
-      In a one paragraph response with no titles, summarize the following Jira ticket for a software engineer preparing to review a pull request. 
-      Be concise and focus on the problem and any key technical details relevant to the code changes.
+  You are a senior software engineer preparing to review a pull request. Before diving into the code, you want a clear and concise summary of the Jira ticket and how the PR addresses it.
 
-      ${context.jiraIssue ? `
-      Jira Data:
-      Ticket: {jira_key}
-      Summary: {jira_summary}
-      Description: {jira_description}
-      Status: {jira_status}
-      ` : ''}
+  **Context (One Paragraph):**  
+  Summarize the Jira ticket in a way that highlights the core problem and any relevant technical details. Then, briefly explain how the PR attempts to resolve it, focusing only on the most critical aspects of the changes. Be clear and concise.
 
-      ${context.pullRequest ? `
-      Pull Request Data:
-      PR #{pr_number}: {pr_title}
-      State: {pr_state}
-      Created by: {pr_author}
-      Description: {pr_body}
+  **Opinion:**  
+  Analyze whether the PR effectively solves the problem. If it does, explain why the approach is appropriate. If not, highlight gaps, risks, or alternative approaches that might be better. Keep it direct and actionable.
 
-      Modified Files:
-      {pr_files}
+  ${context.jiraIssue ? `
+  **Jira Data:**  
+  - Ticket: {jira_key}  
+  - Summary: {jira_summary}  
+  - Description: {jira_description}  
+  - Status: {jira_status}  
+  ` : ''}
 
-      Code Changes:
-      {pr_patches}
-      ` : ''}
-    `);
+  ${context.pullRequest ? `
+  **Pull Request Data:**  
+  - PR #{pr_number}: {pr_title}  
+  - State: {pr_state}  
+  - Created by: {pr_author}  
+  - Description: {pr_body}  
+
+  **Modified Files:**  
+  {pr_files}  
+
+  **Code Changes:**  
+  {pr_patches}  
+  ` : ''}
+`);
 
     const chain = prompt.pipe(model);
 
