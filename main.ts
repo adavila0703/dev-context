@@ -1,8 +1,7 @@
 import { config } from 'dotenv';
 import * as readlineSync from 'readline-sync';
-import { Ollama } from '@langchain/community/llms/ollama';
-import { StringOutputParser } from '@langchain/core/output_parsers';
-import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { Ollama } from '@langchain/ollama';
+import { PromptTemplate } from '@langchain/core/prompts';
 
 config();
 
@@ -79,22 +78,26 @@ async function fetchJiraTicket(ticketNumber: string): Promise<void> {
 
 async function analyzeWithOllama(issue: JiraIssue): Promise<void> {
   try {
-    const model = new Ollama({ model: "llama2" });
+    const model = new Ollama({
+      model: "deepseek-r1:14b",
+      temperature: 0,
+      maxRetries: 2,
+    });
 
-    const prompt = ChatPromptTemplate.fromTemplate(`
-            Analyze this Jira ticket and provide insights:
+    console.log('Connecing with model:', model.model);
+
+    const prompt = PromptTemplate.fromTemplate(`
+            In a one paragraph response with no titles, summarize the following Jira ticket for a software engineer preparing to review a pull request. 
+            Be concise and focus on the problem and any key technical details relevant to the code changes.
+
+            Jira Data:
             Ticket: {key}
             Summary: {summary}
             Description: {description}
             Status: {status}
-            
-            Please provide:
-            1. A brief analysis of the ticket
-            2. Potential next steps or recommendations
-            3. Any potential risks or concerns
         `);
 
-    const chain = prompt.pipe(model).pipe(new StringOutputParser());
+    const chain = prompt.pipe(model)
 
     const response = await chain.invoke({
       key: issue.key,
