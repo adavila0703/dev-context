@@ -150,13 +150,17 @@ async function fetchGitHubPR(prNumber: string): Promise<{ pr: GitHubPR; files: G
     console.log(`Created at: ${new Date(pr.created_at).toLocaleString()}`);
     console.log(`Last updated: ${new Date(pr.updated_at).toLocaleString()}`);
     console.log('\nModified Files:');
-    
+
     files.forEach(file => {
       console.log(`\nFile: ${file.filename}`);
       console.log(`Status: ${file.status}`);
       console.log(`Changes: +${file.additions} -${file.deletions}`);
+      if (file.patch) {
+        console.log('\nCode changes:');
+        console.log(file.patch);
+      }
     });
-    
+
     console.log("-------------------");
 
     return { pr, files };
@@ -178,8 +182,8 @@ async function analyzeWithOllama(context: DevelopmentContext): Promise<void> {
     console.log('Connecting with model:', model.model);
 
     const prompt = PromptTemplate.fromTemplate(`
-      Analyze the following development context and provide a comprehensive summary for a software engineer.
-      Focus on the technical details and relationships between the Jira ticket and PR changes.
+      In a one paragraph response with no titles, summarize the following Jira ticket for a software engineer preparing to review a pull request. 
+      Be concise and focus on the problem and any key technical details relevant to the code changes.
 
       ${context.jiraIssue ? `
       Jira Data:
@@ -198,12 +202,10 @@ async function analyzeWithOllama(context: DevelopmentContext): Promise<void> {
 
       Modified Files:
       {pr_files}
-      ` : ''}
 
-      Please provide:
-      1. A technical summary of the changes
-      2. Any potential areas that need special attention during review
-      3. Suggestions for testing these changes
+      Code Changes:
+      {pr_patches}
+      ` : ''}
     `);
 
     const chain = prompt.pipe(model);
@@ -218,9 +220,12 @@ async function analyzeWithOllama(context: DevelopmentContext): Promise<void> {
       pr_state: context.pullRequest?.pr.state || '',
       pr_author: context.pullRequest?.pr.user.login || '',
       pr_body: context.pullRequest?.pr.body || '',
-      pr_files: context.pullRequest?.files.map(f => 
+      pr_files: context.pullRequest?.files.map(f =>
         `${f.filename} (${f.status}): +${f.additions} -${f.deletions}`
-      ).join('\n') || ''
+      ).join('\n') || '',
+      pr_patches: context.pullRequest?.files.map(f =>
+        `=== ${f.filename} ===\n${f.patch || 'No patch available'}`
+      ).join('\n\n') || ''
     });
 
     console.log('\nAI Analysis:');
@@ -237,15 +242,15 @@ async function main() {
 
   while (true) {
     const context: DevelopmentContext = {};
-    
+
     console.log("\nEnter information (press Enter to skip):");
     const ticketNumber = readlineSync.question('Jira ticket number (e.g., PROJ-123): ');
     const prNumber = readlineSync.question('GitHub PR number: ');
-    
+
     if (ticketNumber.trim()) {
       context.jiraIssue = await fetchJiraTicket(ticketNumber.trim());
     }
-    
+
     if (prNumber.trim()) {
       context.pullRequest = await fetchGitHubPR(prNumber.trim());
     }
