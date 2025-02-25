@@ -24,7 +24,8 @@ A development context tool that combines Jira ticket and GitHub PR information f
 ### Running the Tool
 1. Install dependencies: `npm install`
 2. Download and install Ollama
-3. Start the tool: `npm start`
+3. Install bun `npm install -g bun`
+4. bun main.ts
 
 ## Usage
 - Enter a Jira ticket number (e.g., PROJ-123) to get ticket details
