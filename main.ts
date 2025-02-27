@@ -68,6 +68,7 @@ async function fetchJiraTicket(ticketNumber: string): Promise<JiraIssue | undefi
   const url = `https://${jiraDomain}/rest/api/2/search?jql=${encodeURIComponent(jql)}`;
 
   try {
+    console.log(`Fetching Jira data...`);
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -96,7 +97,6 @@ async function fetchJiraTicket(ticketNumber: string): Promise<JiraIssue | undefi
     console.log(`Summary: ${issue.fields.summary}`);
     console.log(`Status: ${issue.fields.status.name}`);
     console.log(`Description: ${issue.fields.description || 'No description provided'}`);
-    console.log("-------------------");
 
     return issue;
 
@@ -119,6 +119,7 @@ async function fetchGitHubPR(prNumber: string, repo: string): Promise<{ pr: GitH
     const prUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`;
     const filesUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files`;
 
+    console.log(`Fetching Github PR data...`);
     const [prResponse, filesResponse] = await Promise.all([
       fetch(prUrl, {
         headers: {
@@ -148,18 +149,6 @@ async function fetchGitHubPR(prNumber: string, repo: string): Promise<{ pr: GitH
     console.log(`Created by: ${pr.user.login}`);
     console.log(`Created at: ${new Date(pr.created_at).toLocaleString()}`);
     console.log(`Last updated: ${new Date(pr.updated_at).toLocaleString()}`);
-    console.log('\nModified Files:');
-
-    files.forEach(file => {
-      console.log(`\nFile: ${file.filename}`);
-      console.log(`Status: ${file.status}`);
-      console.log(`Changes: +${file.additions} -${file.deletions}`);
-      if (file.patch) {
-        console.log('\nCode changes:');
-        console.log(file.patch);
-      }
-    });
-
     console.log("-------------------");
 
     return { pr, files };
